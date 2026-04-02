@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KPI IMPLEMENTAÇÃO - Sistema de Gestão</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; }
+        .kpi-card { @apply bg-white p-6 rounded-2xl shadow-sm border border-slate-200 transition-all cursor-pointer hover:shadow-md hover:border-blue-300 active:scale-[0.98]; }
+        .kpi-card.active-filter { @apply ring-2 ring-blue-500 border-blue-500 bg-blue-50/30; }
+        .status-badge { @apply px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider; }
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+        .modal.active { display: flex; }
+        input, select { @apply bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm; }
+        
+        /* Estilo personalizado para a legenda do Chart.js */
+        .chart-legend-item { @apply flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded transition-colors; }
+        .legend-bullet { @apply w-3 h-3 rounded-full; }
+    </style>
+</head>
+<body class="antialiased text-slate-800">
+
+    <!-- Navegação Superior -->
+    <nav class="bg-white border-b border-slate-200 px-6 py-4 flex flex-col lg:flex-row justify-between items-center sticky top-0 z-50 gap-4">
+        <div class="flex items-center gap-3">
+            <div class="bg-blue-600 p-2 rounded-lg text-white">
+                <i class="fas fa-chart-line"></i>
+            </div>
+            <h1 class="text-xl font-bold text-slate-900 uppercase tracking-tight">Gestão de Implementação</h1>
+        </div>
+        
+        <div class="flex flex-wrap items-center justify-center gap-3">
+            <!-- Meta Mensal -->
+            <div class="flex items-center gap-2 bg-amber-50 p-1.5 rounded-xl border border-amber-100">
+                <span class="text-[10px] font-bold text-amber-600 uppercase ml-2">Meta do Mês:</span>
+                <input type="number" id="monthlyGoalInput" onchange="updateState()" class="!py-1 !px-2 border-none bg-white shadow-sm w-16 text-center font-bold" value="10">
+            </div>
+
+            <!-- Data de Referência -->
+            <div class="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+                <span class="text-[10px] font-bold text-slate-500 uppercase ml-2">Visualizar como:</span>
+                <input type="date" id="refDateInput" onchange="updateState()" class="!py-1 !px-2 border-none bg-white shadow-sm">
+            </div>
+
+            <input type="file" id="csvInput" accept=".csv, .tsv, .txt" class="hidden" onchange="handleFileUpload(event)">
+            <button onclick="document.getElementById('csvInput').click()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl text-sm font-semibold transition-all">
+                <i class="fas fa-file-import mr-2"></i> Subir CSV
+            </button>
+            <button onclick="toggleModal(true)" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-lg shadow-blue-200 transition-all">
+                <i class="fas fa-plus mr-2"></i> Novo Projeto
+            </button>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto p-6 md:p-8">
+        
+        <!-- Grade de KPIs Superiores -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+            <div id="filterAll" onclick="setFilter('all')" class="kpi-card border-t-4 border-t-slate-400 active-filter">
+                <span class="text-slate-400 font-bold text-[10px] uppercase tracking-widest block mb-2">Total Geral</span>
+                <h2 id="valTotal" class="text-3xl font-extrabold tracking-tight">0</h2>
+                <p class="text-[10px] text-slate-400 mt-2 italic">Todos os projetos</p>
+            </div>
+
+            <div id="filterPlataforma" onclick="setFilter('plataforma')" class="kpi-card border-t-4 border-t-emerald-500">
+                <span class="text-emerald-600 font-bold text-[10px] uppercase tracking-widest block mb-2">Plataformas / Upsell</span>
+                <h2 id="valPlataforma" class="text-3xl font-extrabold text-slate-800 tracking-tight">0</h2>
+                <p id="subPlataforma" class="text-[10px] text-slate-400 mt-2 font-medium">Ver projetos</p>
+            </div>
+
+            <div id="filterSatelite" onclick="setFilter('satelite')" class="kpi-card border-t-4 border-t-purple-500">
+                <span class="text-purple-600 font-bold text-[10px] uppercase tracking-widest block mb-2">Satélites (MPI/Excl)</span>
+                <h2 id="valSatelite" class="text-3xl font-extrabold text-slate-800 tracking-tight">0</h2>
+                <p id="subSatelite" class="text-[10px] text-slate-400 mt-2 font-medium">Ver projetos</p>
+            </div>
+
+            <div id="filterEntregues" onclick="setFilter('entregues_mes')" class="kpi-card border-t-4 border-t-amber-500">
+                <span class="text-amber-600 font-bold text-[10px] uppercase tracking-widest block mb-2">Entregas do Mês</span>
+                <div class="flex items-baseline gap-2">
+                    <h2 id="valEntreguesMes" class="text-3xl font-extrabold text-slate-800 tracking-tight">0</h2>
+                    <span id="valGoalDisplay" class="text-slate-400 font-bold text-sm">/ 0</span>
+                </div>
+                <div class="w-full bg-slate-100 h-1.5 rounded-full mt-3 overflow-hidden">
+                    <div id="barMeta" class="bg-amber-500 h-1.5 rounded-full transition-all duration-1000" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div id="filterSucesso" onclick="setFilter('sucesso')" class="kpi-card border-t-4 border-t-blue-600">
+                <span class="text-blue-600 font-bold text-[10px] uppercase tracking-widest block mb-2">KPI Sucesso</span>
+                <h2 id="valSucesso" class="text-3xl font-extrabold text-blue-600 tracking-tight">0%</h2>
+                <div class="w-full bg-slate-100 h-1.5 rounded-full mt-3 overflow-hidden">
+                    <div id="barSucesso" class="bg-blue-600 h-1.5 rounded-full transition-all duration-1000" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <!-- Coluna de Gráficos e Resumo -->
+            <div class="lg:col-span-4 space-y-6">
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                    <h3 class="font-bold text-slate-900 mb-6 flex items-center gap-2">
+                        <i class="fas fa-hourglass-half text-blue-500"></i> Saúde dos Prazos
+                    </h3>
+                    <div class="h-[220px] relative mb-6">
+                        <canvas id="chartPrazo"></canvas>
+                    </div>
+                    <!-- Legenda Customizada -->
+                    <div id="chartLegend" class="flex flex-col gap-2 border-t border-slate-100 pt-4">
+                        <div class="chart-legend-item" onclick="setFilter('sucesso')">
+                            <div class="legend-bullet bg-blue-600"></div>
+                            <span class="text-xs font-medium text-slate-600 flex-1">Projetos no Prazo</span>
+                            <span id="legendValSucesso" class="text-xs font-bold text-slate-900">0</span>
+                        </div>
+                        <div class="chart-legend-item" onclick="setFilter('atraso')">
+                            <div class="legend-bullet bg-red-500"></div>
+                            <span class="text-xs font-medium text-slate-600 flex-1">Projetos em Atraso</span>
+                            <span id="legendValAtraso" class="text-xs font-bold text-slate-900">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                    <h3 class="font-bold text-slate-900 mb-4 text-sm">Ações da Base</h3>
+                    <button onclick="clearData()" class="w-full text-[10px] text-slate-400 hover:text-red-500 font-bold uppercase tracking-widest py-3 border-2 border-dashed border-slate-100 rounded-xl transition-all hover:border-red-200">
+                        <i class="fas fa-trash-alt mr-1"></i> Limpar Tudo
+                    </button>
+                </div>
+            </div>
+
+            <!-- Coluna da Tabela -->
+            <div class="lg:col-span-8 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div class="p-6 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0 z-20">
+                    <div class="flex items-center gap-4">
+                        <h3 class="font-bold text-slate-900 flex items-center gap-2">
+                            <i class="fas fa-database text-blue-500 text-xs"></i> Base de Projetos
+                        </h3>
+                        <div id="filterBadge" class="hidden bg-blue-100 text-blue-700 text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider items-center gap-2">
+                            <span id="filterLabel">Filtro Ativo</span>
+                            <button onclick="setFilter('all')" class="hover:text-blue-900"><i class="fas fa-times-circle"></i></button>
+                        </div>
+                    </div>
+                    <span id="rowCount" class="text-[10px] bg-slate-100 px-2 py-1 rounded font-bold text-slate-500 uppercase">0 registros</span>
+                </div>
+                <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
+                    <table class="w-full text-left">
+                        <thead class="bg-slate-50 sticky top-0 z-10">
+                            <tr class="text-slate-400 uppercase text-[10px] font-bold tracking-widest border-b border-slate-100">
+                                <th class="px-6 py-4">Empresa</th>
+                                <th class="px-6 py-4">Tipo</th>
+                                <th class="px-6 py-4">Previsão</th>
+                                <th class="px-6 py-4">Entrega Real</th>
+                                <th class="px-6 py-4 text-right">Situação</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tableBody" class="divide-y divide-slate-100 text-xs">
+                            <!-- Injetado via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal Cadastro -->
+    <div id="modalAdd" class="modal">
+        <div class="bg-white w-full max-w-lg p-8 rounded-3xl shadow-2xl mx-4">
+            <div class="flex justify-between items-start mb-6">
+                <h3 class="text-xl font-bold text-slate-900">Novo Projeto / Atualizar</h3>
+                <button onclick="toggleModal(false)" class="text-slate-400 hover:text-slate-600"><i class="fas fa-times"></i></button>
+            </div>
+            <form id="projectForm" class="space-y-4">
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">Nome da Empresa</label>
+                    <input type="text" id="formEmpresa" name="empresa" required class="w-full" placeholder="Ex: Impacto Visual">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">Tipo</label>
+                        <select name="tipo" id="formTipo" class="w-full">
+                            <optgroup label="Plataformas">
+                                <option value="Plataforma">Plataforma</option>
+                                <option value="Upsell">Upsell</option>
+                            </optgroup>
+                            <optgroup label="Satélites">
+                                <option value="Satélite MPI">Satélite MPI</option>
+                                <option value="Satélite Exclusive">Satélite Exclusive</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">Previsão de Entrega</label>
+                        <input type="date" name="previsao" id="formPrevisao" required class="w-full">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1">Data da Entrega Real (Opcional)</label>
+                    <input type="date" name="entregaReal" id="formEntregaReal" class="w-full">
+                </div>
+                <div class="flex gap-3 pt-4">
+                    <button type="button" onclick="toggleModal(false)" class="flex-1 px-4 py-2 text-slate-500 font-bold text-sm">Cancelar</button>
+                    <button type="submit" class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-blue-200">Salvar Projeto</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const todayStr = new Date().toISOString().split('T')[0];
+        document.getElementById('refDateInput').value = todayStr;
+
+        let projects = JSON.parse(localStorage.getItem('imp_projects')) || [];
+        let monthlyGoal = localStorage.getItem('imp_monthly_goal') || 10;
+        document.getElementById('monthlyGoalInput').value = monthlyGoal;
+        
+        let currentFilter = 'all'; 
+        let chartInstance = null;
+
+        // Regras de classificação de agrupamento
+        const isPlataformaGroup = (tipo) => {
+            const t = tipo.toLowerCase();
+            return t === 'plataforma' || t === 'upsell';
+        };
+
+        const isSateliteGroup = (tipo) => {
+            const t = tipo.toLowerCase();
+            return t === 'satélite mpi' || t === 'satélite exclusive' || t.includes('satélite');
+        };
+
+        function toggleModal(show) {
+            document.getElementById('modalAdd').classList.toggle('active', show);
+            if(!show) document.getElementById('projectForm').reset();
+        }
+
+        function clearData() {
+            if(confirm("Deseja realmente limpar toda a base de dados?")) {
+                projects = [];
+                updateState();
+            }
+        }
+
+        function setFilter(filterType) {
+            currentFilter = filterType;
+            
+            // UI dos cards
+            document.querySelectorAll('.kpi-card').forEach(card => card.classList.remove('active-filter'));
+            const filterMap = {
+                'all': 'filterAll',
+                'plataforma': 'filterPlataforma',
+                'satelite': 'filterSatelite',
+                'entregues_mes': 'filterEntregues',
+                'sucesso': 'filterSucesso'
+            };
+
+            const activeCardId = filterMap[filterType];
+            if(activeCardId && document.getElementById(activeCardId)) {
+                document.getElementById(activeCardId).classList.add('active-filter');
+            }
+
+            // Badge de filtro ativo
+            const badge = document.getElementById('filterBadge');
+            const label = document.getElementById('filterLabel');
+            if(filterType === 'all') {
+                badge.classList.add('hidden');
+            } else {
+                badge.classList.remove('hidden');
+                badge.classList.add('flex');
+                const labels = {
+                    'plataforma': 'Filtro: Plataformas / Upsell',
+                    'satelite': 'Filtro: Satélites',
+                    'entregues_mes': 'Filtro: Entregas do Mês',
+                    'sucesso': 'Filtro: No Prazo',
+                    'atraso': 'Filtro: Em Atraso'
+                };
+                label.innerText = labels[filterType];
+            }
+
+            renderDashboard();
+        }
+
+        document.getElementById('projectForm').onsubmit = function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            const empresa = formData.get('empresa');
+            
+            const existingIndex = projects.findIndex(p => p.empresa === empresa);
+            const projectData = {
+                empresa: empresa,
+                tipo: formData.get('tipo'),
+                previsao: formData.get('previsao'),
+                entregaReal: formData.get('entregaReal') || null
+            };
+
+            if(existingIndex > -1) projects[existingIndex] = projectData;
+            else projects.push(projectData);
+
+            updateState();
+            toggleModal(false);
+        };
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                const rows = text.split(/\r?\n/).slice(1);
+                
+                rows.forEach(row => {
+                    if(!row.trim()) return;
+                    const cols = row.includes('\t') ? row.split('\t') : row.split(',');
+                    if(cols.length >= 2) {
+                        const parseDate = (d) => {
+                            if(!d || !d.includes('/')) return null;
+                            const [day, mon, year] = d.split('/');
+                            return `${year}-${mon.padStart(2, '0')}-${day.padStart(2, '0')}`;
+                        };
+                        projects.push({
+                            empresa: cols[0].replace(/"/g, ''),
+                            tipo: cols[1].replace(/"/g, '').trim(),
+                            previsao: parseDate(cols[5]) || todayStr,
+                            entregaReal: parseDate(cols[6]) || null
+                        });
+                    }
+                });
+                updateState();
+            };
+            reader.readAsText(file);
+        }
+
+        function updateState() {
+            monthlyGoal = document.getElementById('monthlyGoalInput').value;
+            localStorage.setItem('imp_projects', JSON.stringify(projects));
+            localStorage.setItem('imp_monthly_goal', monthlyGoal);
+            renderDashboard();
+        }
+
+        function renderDashboard() {
+            const refDateStr = document.getElementById('refDateInput').value || todayStr;
+            const refDate = new Date(refDateStr + "T23:59:59");
+            const refMonth = refDate.getMonth();
+            const refYear = refDate.getFullYear();
+
+            const tableBody = document.getElementById('tableBody');
+            tableBody.innerHTML = '';
+
+            let totalProjetos = projects.length;
+            let platCount = 0, satCount = 0, successCount = 0, failCount = 0, deliveredThisMonth = 0;
+
+            // Processamento de dados
+            const processedProjects = projects.map(p => {
+                const isPlat = isPlataformaGroup(p.tipo);
+                const isSat = isSateliteGroup(p.tipo);
+                
+                if(isPlat) platCount++; 
+                else if(isSat) satCount++;
+
+                const dPrevisao = new Date(p.previsao + "T00:00:00");
+                const dEntrega = p.entregaReal ? new Date(p.entregaReal + "T00:00:00") : null;
+                
+                const isDeliveredInRefMonth = dEntrega && dEntrega.getMonth() === refMonth && dEntrega.getFullYear() === refYear;
+                if (isDeliveredInRefMonth) deliveredThisMonth++;
+
+                let isSuccess = dEntrega ? (dEntrega <= dPrevisao) : (refDate <= dPrevisao);
+                if(isSuccess) successCount++; else failCount++;
+
+                return { ...p, isPlat, isSat, isSuccess, isDeliveredInRefMonth, dPrevisao, dEntrega };
+            });
+
+            // Aplicação de filtros na tabela
+            const filteredProjects = processedProjects.filter(p => {
+                if (currentFilter === 'all') return true;
+                if (currentFilter === 'plataforma') return p.isPlat;
+                if (currentFilter === 'satelite') return p.isSat;
+                if (currentFilter === 'entregues_mes') return p.isDeliveredInRefMonth;
+                if (currentFilter === 'sucesso') return p.isSuccess;
+                if (currentFilter === 'atraso') return !p.isSuccess;
+                return true;
+            });
+
+            // Renderização das linhas
+            filteredProjects.forEach(p => {
+                const statusText = p.dEntrega 
+                    ? (p.isSuccess ? "Entregue no Prazo" : "Entregue c/ Atraso")
+                    : (p.isSuccess ? "No Prazo" : "Em Atraso");
+                
+                const statusColor = p.isSuccess ? "bg-blue-50 text-blue-600" : "bg-red-50 text-red-600";
+                const typeBadgeColor = p.isPlat ? 'bg-emerald-50 text-emerald-600' : 'bg-purple-50 text-purple-600';
+
+                const row = document.createElement('tr');
+                row.className = "hover:bg-slate-50/80 transition-all cursor-pointer";
+                row.onclick = () => {
+                    document.getElementById('formEmpresa').value = p.empresa;
+                    document.getElementById('formTipo').value = p.tipo;
+                    document.getElementById('formPrevisao').value = p.previsao;
+                    document.getElementById('formEntregaReal').value = p.entregaReal || '';
+                    toggleModal(true);
+                };
+                
+                row.innerHTML = `
+                    <td class="px-6 py-4 font-semibold text-slate-700 max-w-[180px] truncate">${p.empresa}</td>
+                    <td class="px-6 py-4">
+                        <span class="text-[9px] font-bold px-2 py-0.5 rounded ${typeBadgeColor}">
+                            ${p.tipo.toUpperCase()}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 text-slate-500">${p.dPrevisao.toLocaleDateString('pt-BR')}</td>
+                    <td class="px-6 py-4 text-slate-800 font-bold">${p.dEntrega ? p.dEntrega.toLocaleDateString('pt-BR') : '<span class="text-slate-300 italic font-normal">Pendente</span>'}</td>
+                    <td class="px-6 py-4 text-right">
+                        <span class="status-badge ${statusColor}">${statusText}</span>
+                    </td>
+                `;
+                tableBody.appendChild(row);
+            });
+
+            // Atualização dos Widgets e Legenda
+            document.getElementById('valTotal').innerText = totalProjetos;
+            document.getElementById('rowCount').innerText = `${filteredProjects.length} exibidos`;
+            document.getElementById('valPlataforma').innerText = platCount;
+            document.getElementById('valSatelite').innerText = satCount;
+            
+            document.getElementById('legendValSucesso').innerText = successCount;
+            document.getElementById('legendValAtraso').innerText = failCount;
+            
+            const pPlat = totalProjetos ? ((platCount/totalProjetos)*100).toFixed(0) : 0;
+            const pSat = totalProjetos ? ((satCount/totalProjetos)*100).toFixed(0) : 0;
+            document.getElementById('subPlataforma').innerText = `${pPlat}% do total`;
+            document.getElementById('subSatelite').innerText = `${pSat}% do total`;
+
+            document.getElementById('valEntreguesMes').innerText = deliveredThisMonth;
+            document.getElementById('valGoalDisplay').innerText = `/ ${monthlyGoal}`;
+            const metaRate = monthlyGoal > 0 ? Math.min((deliveredThisMonth / monthlyGoal) * 100, 100) : 0;
+            document.getElementById('barMeta').style.width = `${metaRate}%`;
+
+            const rate = totalProjetos ? ((successCount / totalProjetos) * 100).toFixed(1) : 0;
+            document.getElementById('valSucesso').innerText = `${rate}%`;
+            document.getElementById('barSucesso').style.width = `${rate}%`;
+
+            renderChart(successCount, failCount);
+        }
+
+        function renderChart(onTime, late) {
+            const ctx = document.getElementById('chartPrazo').getContext('2d');
+            if(chartInstance) chartInstance.destroy();
+            chartInstance = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['No Prazo', 'Em Atraso'],
+                    datasets: [{
+                        data: [onTime, late],
+                        backgroundColor: ['#2563eb', '#ef4444'],
+                        hoverBackgroundColor: ['#1d4ed8', '#dc2626'],
+                        borderWidth: 4,
+                        borderColor: '#ffffff',
+                        borderRadius: 2
+                    }]
+                },
+                options: { 
+                    cutout: '80%', 
+                    plugins: { 
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return ` ${context.label}: ${context.raw} projetos`;
+                                }
+                            }
+                        }
+                    }, 
+                    maintainAspectRatio: false,
+                    onClick: (evt, elements) => {
+                        if (elements.length > 0) {
+                            const index = elements[0].index;
+                            setFilter(index === 0 ? 'sucesso' : 'atraso');
+                        }
+                    }
+                }
+            });
+        }
+
+        window.onload = renderDashboard;
+    </script>
+</body>
+</html>
